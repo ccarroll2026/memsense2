@@ -1,19 +1,19 @@
 #include <vector>
 #include <cstdint>
 #include <iostream>
-#include <variant>
 #include <algorithm>
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <string.h>
 #include <stdexcept>
 #include <cstdint>
 #include <iomanip>
 
 #include "structs.h"
 #include "MemsenseCommon.hpp"
+
+/*Example script to send messages to memsense device*/
 
 int openSerial()
 {

@@ -11,7 +11,7 @@
 #include "structs.h"
 #include "MemsenseCommon.hpp"
 
-uint8_t echo; //last command sent
+uint8_t echo; //last command sent, for verification
 int serialFd = -1; //set by the caller after opening the port
 
 P_Error ack;
@@ -100,11 +100,6 @@ bool goodPacket(std::vector<uint8_t> packet)
     bool passed = headerGood && payloadSizeGood && csGood;
     return(passed);
 }
-
-// void dataToPacket(std::vector<char> data)
-// {
-//     parsePacket(data);
-// }
 
 bool vector2Struct(uint8_t type, std::vector<uint8_t> vec)
 {
