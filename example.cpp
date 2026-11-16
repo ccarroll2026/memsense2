@@ -1,101 +1,47 @@
-#include <vector>
 #include <cstdint>
 #include <iostream>
-#include <algorithm>
-#include <fcntl.h>
-#include <termios.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdexcept>
 #include <cstdint>
 #include <iomanip>
+#include <cstring>
 
 #include "structs.h"
 #include "MemsenseCommon.hpp"
+#include "example.hpp"
 
-/*Example script to send messages to memsense device*/
-
-int openSerial()
-{
-    int fd = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
-    if (fd < 0) {
-        std::cerr << "Error opening serial port" << std::endl;
-        std::cout << errno << std::endl;
-        return 1;
-    }
-
-    struct termios tty;
-    tcgetattr(fd, &tty);
-    cfmakeraw(&tty); // disable ICRNL/IXON/ICANON etc. so binary bytes pass through untouched
-    cfsetspeed(&tty, B115200);
-    tty.c_cflag |= (CLOCAL | CREAD);
-    tty.c_cc[VMIN] = 1;
-    tty.c_cc[VTIME] = 0;
-    tty.c_cflag &= ~CRTSCTS; // no hardware flow control
-    tcsetattr(fd, TCSANOW, &tty);
-
-    // The device only answers commands with DTR and RTS asserted
-    int modem = TIOCM_DTR | TIOCM_RTS;
-    ioctl(fd, TIOCMBIS, &modem);
-    usleep(200000); // let the lines settle
-    tcflush(fd, TCIFLUSH);
-
-    serialFd = fd;
-    return 0;
-}
+namespace mscip{
 
 int readSerial()
 {
-    // std::cout << "read serial" << std::endl;
     int fd = serialFd;
     if (fd < 0) {
         std::cerr << "Serial port not open" << std::endl;
         return 1;
     }
 
-    std::vector<uint8_t> holdThis;
+    uint8_t hold[261];
     uint8_t buf[256];
-    int tries = 100;
+    int tries = 3;
+    int end = 0;
 
     while (tries > 0) {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0) {
-            holdThis.insert(holdThis.end(), buf, buf + n);
 
-            // Extract every complete, checksum-valid packet from the buffer.
-            // Packet layout: A5 A5 type len payload[len] cs1 cs2  (len + 6 bytes total)
-            size_t pos = 0;
-            while (true)
+            if (sizeof(hold) - end < n)
             {
-                // find the next sync pair
-                size_t sync = pos;
-                while (sync + 1 < holdThis.size() && !(holdThis[sync] == 0xA5 && holdThis[sync + 1] == 0xA5))
-                    sync++;
-                if (sync + 1 >= holdThis.size())
-                {
-                    // no sync pair; a trailing 0xA5 might be the start of one
-                    pos = (!holdThis.empty() && holdThis.back() == 0xA5) ? holdThis.size() - 1 : holdThis.size();
-                    break;
-                }
-                pos = sync;
-                if (holdThis.size() - pos < 4) break; // need the length byte
-
-                size_t total = holdThis[pos + 3] + 6;
-                if (holdThis.size() - pos < total) break; // wait for the rest
-
-                std::vector<uint8_t> pkt(holdThis.begin() + pos, holdThis.begin() + pos + total);
-                P_Checksum cs = vecChecksum(pkt);
-                if (cs.f1 == pkt[total - 2] && cs.f2 == pkt[total - 1])
-                {
-                    parsePacket(std::vector<char>(pkt.begin(), pkt.end()));
-                    pos += total;
-                }
-                else
-                {
-                    pos++; // false sync or corrupt packet: skip this byte and rescan
-                }
+                break;
             }
-            holdThis.erase(holdThis.begin(), holdThis.begin() + pos);
+            std::memcpy(hold + end, buf, n);
+            end += n;
+
+            int pos = parseSerial(hold, end);
+            if (pos != 0)
+            {
+                std::memcpy(hold, hold + pos, end - pos);
+                end = end - pos;
+            }
         }
         tries--;
     }
@@ -106,16 +52,42 @@ int readSerial()
 void printFlags()
 {
     std::cout << "flags: " ;
-    for (std::string flag : getFlags())
+    std::vector<std::string> sFlags;
+    auto flags = getFlags();
+    if (flags[0] == 1){ sFlags.push_back("ack"); }
+    if (flags[1] == 1){ sFlags.push_back("devComm"); }
+    if (flags[2] == 1){ sFlags.push_back("devMod"); }
+    if (flags[3] == 1){ sFlags.push_back("devSN"); }
+    if (flags[4] == 1){ sFlags.push_back("devFW"); }
+    if (flags[5] == 1){ sFlags.push_back("devCalDate"); }
+    if (flags[6] == 1){ sFlags.push_back("acc"); }
+    if (flags[7] == 1){ sFlags.push_back("ang"); }
+    if (flags[8] == 1){ sFlags.push_back("mag"); }
+    if (flags[9] == 1){ sFlags.push_back("deltaTheta"); }
+    if (flags[10] == 1){ sFlags.push_back("deltaVel"); }
+    if (flags[11] == 1){ sFlags.push_back("pressure"); }
+    if (flags[12] == 1){ sFlags.push_back("temperature"); }
+    if (flags[13] == 1){ sFlags.push_back("gpsCorrTime"); }
+    if (flags[14] == 1){ sFlags.push_back("auxAcc"); }
+
+    for (std::string flag : sFlags)
     {
         std::cout << flag << " ";
     }
-    std::cout << "\n" << std::endl;
+    std::cout << std::endl;
+
 }
 
-int main()
+void testCommands()
 {
-    if (openSerial() != 0) return 1;
+    std::cout << "checksum gps" << std::endl;
+    uint8_t buf[9] = {0xA5, 0xA5, 0x02, 0x03, 0x0C, 0x01, 0x05, 0x00, 0x00};
+
+
+    P_Checksum cs = Checksum(buf, 8);
+    std::cout << cs << std::endl;
+
+
     std::cout << "Ping ";
     ping();
     readSerial();
@@ -145,6 +117,16 @@ int main()
     sendGetDevCmd(PE_Get_Dev_Cal);
     readSerial();
     printFlags();
+}
+
+} // namespace mscip
+
+int main()
+{
+    using namespace mscip;
+    if (openSerial() != 0) return 1;
+    
+    testCommands();
 
     close(serialFd);
     serialFd = -1;

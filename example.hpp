@@ -1,0 +1,3 @@
+namespace mscip {
+int openSerial();
+}

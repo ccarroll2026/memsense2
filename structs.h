@@ -2,6 +2,7 @@
 #define P_structs
 
 #include <cstdint>
+#include <ostream>
 
 enum P_Msg_Type {
     PE_Basic_Msg = 0x01,
