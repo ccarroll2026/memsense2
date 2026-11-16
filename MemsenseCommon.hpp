@@ -21,4 +21,24 @@ std::unique_ptr<uint8_t[]> sendCorrGpsTime(uint8_t WNmsb, uint8_t WNlsb, uint8_t
 
 int parseSerial(uint8_t serial[261], int end);
 std::unique_ptr<uint8_t[]> getFlags();
+
+P_Error get_ack();
+P_Device_Msg_Reply get_devComm();
+P_Get_Device_Reply getDevMod();
+P_Get_Device_Reply getDevSN();
+P_Get_Device_Reply getDevFW();
+P_Get_Device_Reply getDevCalDate();
+P_Scaled_Vec getAccVec();
+P_Scaled_Vec getAngVec();
+P_Scaled_Vec getMagVec();
+P_Scaled_Vec getDTVec();
+P_Scaled_Vec getDVVec();
+P_Scaled_Single getPressure();
+P_Scaled_Single getTemperature();
+P_Time_Data getTimeData();
+P_Scaled_Vec getAuxAcc();
+
+int getPacketsAccepted();
+int getchecksumFailures();
+int getBytesDiscarded();
 }

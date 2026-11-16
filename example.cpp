@@ -80,14 +80,6 @@ void printFlags()
 
 void testCommands()
 {
-    std::cout << "checksum gps" << std::endl;
-    uint8_t buf[9] = {0xA5, 0xA5, 0x02, 0x03, 0x0C, 0x01, 0x05, 0x00, 0x00};
-
-
-    P_Checksum cs = Checksum(buf, 8);
-    std::cout << cs << std::endl;
-
-
     std::cout << "Ping ";
     ping();
     readSerial();
@@ -117,6 +109,10 @@ void testCommands()
     sendGetDevCmd(PE_Get_Dev_Cal);
     readSerial();
     printFlags();
+
+    std::cout << "packets accepted = " << getPacketsAccepted() << std::endl;
+    std::cout << "checksum fails = " << getchecksumFailures() << std::endl;
+    std::cout << "bytes discarded = " << getBytesDiscarded() << std::endl;
 }
 
 } // namespace mscip

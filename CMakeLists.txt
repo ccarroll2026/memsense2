@@ -25,7 +25,7 @@ target_link_libraries(example PRIVATE mscip)
 target_link_libraries(my_tests PRIVATE mscip gtest gtest_main)
 # target_link_libraries(my_tests GTest::gtest GTest::gtest_main pthread)
 
-target_include_directories(mscip PUBLIC MemsenseCommon.hpp structs.h)
+target_include_directories(mscip PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 option(MSCIP_BUILD_TESTS "Build unit tests" ON)
 option(MSCIP_SANITIZE "Build with ASan and UBSan" OFF)

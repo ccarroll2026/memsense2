@@ -58,21 +58,25 @@ namespace {
 
 }
 
-// P_Error get_ack() {return ack;}
-// P_Device_Msg_Reply get_devComm(){return devComm;}
-// P_Get_Device_Reply getDevMod(){return devMod;}
-// P_Get_Device_Reply getDevSN(){return devSN;}
-// P_Get_Device_Reply getDevFW(){return devFW;}
-// P_Get_Device_Reply getDevCalDate(){return devCalDate;}
-// P_Scaled_Vec getAccVec(){return accVec;}
-// P_Scaled_Vec getAngVec(){return angVec;}
-// P_Scaled_Vec getMagVec(){return magVec;}
-// P_Scaled_Vec getDTVec(){return deltaThetaVec;}
-// P_Scaled_Vec getDVVec(){return deltaVelVec;}
-// P_Scaled_Single getPressure(){return pressure;}
-// P_Scaled_Single getTemperature(){return temperature;}
-// P_Time_Data getTimeData(){return gpsCorrTime;}
-// P_Scaled_Vec getAuxAcc(){return auxAccVec;}
+P_Error get_ack() {return ack;}
+P_Device_Msg_Reply get_devComm(){return devComm;}
+P_Get_Device_Reply getDevMod(){return devMod;}
+P_Get_Device_Reply getDevSN(){return devSN;}
+P_Get_Device_Reply getDevFW(){return devFW;}
+P_Get_Device_Reply getDevCalDate(){return devCalDate;}
+P_Scaled_Vec getAccVec(){return accVec;}
+P_Scaled_Vec getAngVec(){return angVec;}
+P_Scaled_Vec getMagVec(){return magVec;}
+P_Scaled_Vec getDTVec(){return deltaThetaVec;}
+P_Scaled_Vec getDVVec(){return deltaVelVec;}
+P_Scaled_Single getPressure(){return pressure;}
+P_Scaled_Single getTemperature(){return temperature;}
+P_Time_Data getTimeData(){return gpsCorrTime;}
+P_Scaled_Vec getAuxAcc(){return auxAccVec;}
+
+int getPacketsAccepted(){return packetsAccepted;}
+int getchecksumFailures(){return checksumFailures;}
+int getBytesDiscarded(){return bytesDiscarded;}
 
 P_Checksum Checksum(uint8_t buf[261], int end)
 {    
