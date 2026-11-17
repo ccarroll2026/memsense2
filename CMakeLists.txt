@@ -30,5 +30,11 @@ target_include_directories(mscip PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 option(MSCIP_BUILD_TESTS "Build unit tests" ON)
 option(MSCIP_SANITIZE "Build with ASan and UBSan" OFF)
 
+if(MSCIP_SANITIZE)
+    # PUBLIC so example and my_tests (which link mscip) get the same flags
+    target_compile_options(mscip PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(mscip PUBLIC -fsanitize=address,undefined)
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(my_tests)

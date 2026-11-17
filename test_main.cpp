@@ -511,7 +511,7 @@ TEST_F(ParserTest, parseAllSplits)
         std::memcpy(firstPart, toParse, i);
         parser.push(firstPart, i);
 
-        uint8_t secondPart[i];
+        uint8_t secondPart[sizeof(toParse) - i];
         std::memcpy(secondPart, toParse + i, sizeof(toParse) - i);
         auto pack = parser.push(secondPart, sizeof(toParse) - i);
 
@@ -627,6 +627,64 @@ TEST_F(ParserTest, parseMax)
 //     //??
 // }
 
+class FieldIteratorTest : public ::testing::Test {
+protected:
+    Parser parser;
+    static void SetUpTestSuite()
+    {
+    }
+
+    static void TearDownTestSuite()
+    {
+        
+    }
+};
+TEST_F(FieldIteratorTest, parseSingleField)
+{
+    
+    uint8_t pingReply[] = {0xA5, 0xA5, 0x01, 0x04, 0x80, 0x02, 0x02, 0x00, 0xD3, 0xCF};
+    auto pack = parser.push(pingReply, sizeof(pingReply));
+    FieldIterator iterator(pack);
+
+    Field firstField = iterator.getField(0);
+    EXPECT_EQ(firstField.type, 0x01) << "type = " << firstField.type;
+    EXPECT_EQ(firstField.code, 0x80) << "code = " << firstField.code;
+    EXPECT_EQ(firstField.size, 0x02) << "size = " << firstField.size;
+    EXPECT_EQ(firstField.data, pack.payload + 2);
+}
+TEST_F(FieldIteratorTest, parseDoubleField)
+{
+    
+    uint8_t ImuReply[] = {0xA5, 0xA5, 0xA2, 0x1C, 0x81, 0x0C, 0x37, 0xA7, 0xC5, 0xAC, 0x37, 0x7B, 0xA8, 0x82, 0x3F, 0x80, 0x00, 0x65, 0x82, 0x0C, 0x37, 0xA7, 0xC5, 0xAC, 0x37, 0x7B, 0xA8, 0x82, 0x37, 0x49, 0x53, 0x9C, 0x0C, 0x23};
+    auto pack = parser.push(ImuReply, sizeof(ImuReply));
+    FieldIterator iterator(pack);
+
+    Field firstField = iterator.getField(0);
+    EXPECT_EQ(firstField.type, 0xA2) << "type = " << firstField.type;
+    EXPECT_EQ(firstField.code, 0x81) << "code = " << firstField.code;
+    EXPECT_EQ(firstField.size, 0x0C) << "size = " << firstField.size;
+    EXPECT_EQ(firstField.data, pack.payload + 2);
+
+    Field secondField = iterator.getField(iterator.next);
+    EXPECT_EQ(secondField.type, 0xA2) << "type = " << secondField.type;
+    EXPECT_EQ(secondField.code, 0x82) << "code = " << secondField.code;
+    EXPECT_EQ(secondField.size, 0x0C) << "size = " << secondField.size;
+    EXPECT_EQ(secondField.data, pack.payload + 2 + firstField.size + 2);
+}
+TEST_F(FieldIteratorTest, parseBadSize)
+{
+    
+    uint8_t pingReply[10] = {0xA5, 0xA5, 0x01, 0x04, 0x80, 0x07, 0x02, 0x00, 0xD3, 0xCF};
+    auto cs = Checksum(pingReply, 10);
+    pingReply[8] = cs.f1;
+    pingReply[9] = cs.f2;
+    auto pack = parser.push(pingReply, sizeof(pingReply));
+    FieldIterator iterator(pack);
+
+    Field firstField = iterator.getField(0);
+    
+    EXPECT_EQ(iterator.malformed, true);
+}
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
