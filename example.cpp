@@ -20,34 +20,23 @@ int readSerial()
         return 1;
     }
 
-    uint8_t hold[261];
+    // uint8_t hold[261];
     uint8_t buf[256];
     int tries = 3;
-    int end = 0;
+    // int end = 0;
+    Parser parser;
 
     while (tries > 0) {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0) {
-
-            if (sizeof(hold) - end < n)
-            {
-                break;
-            }
-            std::memcpy(hold + end, buf, n);
-            end += n;
-
-            int pos = parseSerial(hold, end);
-            if (pos != 0)
-            {
-                std::memcpy(hold, hold + pos, end - pos);
-                end = end - pos;
-            }
+            parser.push(buf, n);
         }
         tries--;
     }
 
     return 0;
 }
+
 
 void printFlags()
 {
@@ -78,35 +67,68 @@ void printFlags()
 
 }
 
+std::string StatusToString(Status stat)
+{
+    switch (stat)
+    {
+    case Status::Ok:
+        return "Ok";
+    case Status::BufferTooSmall:
+        return "BufferTooSmall";
+    case Status::InvalidArgument:
+        return "InvalidArgument";
+    case Status::Malformed:
+        return "Malformed";
+    case Status::WrongMessage:
+        return "WrongMessage";
+    case Status::portNotOpened:
+        return "portNotOpened";
+    case Status::cannotWrite:
+        return "cannotWrite";
+    default:
+        return "unknown status";
+    }
+}
+
 void testCommands()
 {
     std::cout << "Ping ";
-    ping();
+    auto res = ping();
+    std::cout << StatusToString(res.second) << std::endl;
     readSerial();
     printFlags();
     
     std::cout << "selectSensors Acc Ang ";
-    selectSensorData(PE_Scaled_Acc, PE_Scaled_Ang);
+    uint8_t msg[2] = {0x81, 0x82};
+    auto res1 = selectSensorData(msg, 2);
+    std::cout << StatusToString(res1.second) << std::endl;
     readSerial();
     printFlags();
+    
 
     std::cout << "selectSensors Temp Time ";
-    selectSensorData(PE_Scaled_Temp, PE_GPS_Correlated_Time);
+    uint8_t msg1[2] = {0x87, 0x88};
+    auto res2 = selectSensorData(msg1, 2);
+    std::cout << StatusToString(res2.second) << std::endl;
     readSerial();
     printFlags();
 
     std::cout << "selectSensors Delta theta/vel ";
-    selectSensorData(PE_Delta_Theta, PE_Delta_Vel);
+    uint8_t msg2[2] = {0x84, 0x85};
+    auto res3 = selectSensorData(msg2, 2);
+    std::cout << StatusToString(res3.second) << std::endl;
     readSerial();
     printFlags();
 
-    std::cout << "reset sensors data";
-    resetSensorData();
+    std::cout << "reset sensors data ";
+    auto res4 = resetSensorData();
+    std::cout << StatusToString(res4.second) << std::endl;
     readSerial();
     printFlags();
 
-    std::cout << "reset sensors data";
-    sendGetDevCmd(PE_Get_Dev_Cal);
+    std::cout << "reset sensors data ";
+    auto res5 = sendGetDevCmd(PE_Get_Dev_Cal);
+    std::cout << StatusToString(res5.second) << std::endl;
     readSerial();
     printFlags();
 
@@ -126,5 +148,7 @@ int main()
 
     close(serialFd);
     serialFd = -1;
+
+
     return 0;
 }

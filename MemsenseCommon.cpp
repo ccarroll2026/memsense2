@@ -556,16 +556,16 @@ bool toStruct(uint8_t type, uint8_t buf[261], int end)
     return true;
 }
 
-bool parsePacket(uint8_t buf[261], int end)
+Status parsePacket(uint8_t buf[261], int end)
 {
     if (end != buf[3] + 6)
     {
-        return {};
+        return Status::Malformed;
     }
 
     if(!goodPacket(buf, end))
     {
-        return {};
+        return Status::Malformed;
     }
     
     uint8_t type = buf[2];
@@ -576,7 +576,7 @@ bool parsePacket(uint8_t buf[261], int end)
     //stop if message isnt whole
     if (end - 6 <= dl)
     {
-        return false;
+        return Status::incompleteMessage;
     }
 
     //for each distinct* portion of the message (*has its own message code and size)
@@ -594,7 +594,7 @@ bool parsePacket(uint8_t buf[261], int end)
         //load message into struct instance
         if(!toStruct(type, msg, dl + 2))
         {
-            return false;
+            return Status::InvalidArgument;
         }
 
         //get rid of processed data from front
@@ -608,50 +608,106 @@ bool parsePacket(uint8_t buf[261], int end)
 
     }
 
-    return true;
+    return Status::Ok;
 }
 
-int parseSerial(uint8_t serial[261], int end)
+// Returns true when a validated packet is ready; read it with packet().
+PacketView Parser::push(uint8_t bytes[], int n)
+{
+    if (filled + n > sizeof(parseBuffer))
+    {
+        size_t drop = filled + n - sizeof(parseBuffer); //discard oldest bytes to make room
+        if (drop > filled) drop = filled;
+        std::memmove(parseBuffer, parseBuffer + drop, filled - drop);
+        filled -= drop;
+        bytesDiscarded += drop;
+    }
+    if (static_cast<size_t>(n) > sizeof(parseBuffer)) return {};
+    std::memcpy(parseBuffer + filled, bytes, n);
+    filled += n;
+    //drain every complete packet in the buffer; return the last one found
+    PacketView last = {};
+    for (PacketView p = parsing(); p.payload != nullptr; p = parsing())
+    {
+        last = p;
+    }
+
+    return last;
+}
+
+PacketView Parser::parsing()
 {
     size_t pos = 0;
+    
     while (true)
     {
         size_t sync = pos;
-        while (sync + 1 < end && !(serial[sync] == 0xA5 && serial[sync +1] == 0xA5))
+        while (sync + 1 < filled && !(parseBuffer[sync] == 0xA5 && parseBuffer[sync + 1] == 0xA5))
         {
             sync++;
             bytesDiscarded++;
         }
-        if (sync + 1 >= end)
-        {
-            if (end > 0 && serial[end - 1] == 0xA5)
-                {pos = end -1;}
-            else
-                {pos = end;}
-            pos = 0;
-            break;
-        }
+        if (sync >= filled){
+            break;}
         pos = sync;
-        if (end - pos < 4) { pos=0; break; }
+        if (filled - pos < 4) {
+            break;}
 
-        size_t total = serial[pos + 3] + 6;
-        if (end - pos < total) { pos=0; break; }
+        size_t total = parseBuffer[pos + 3] + 6;
+        if (filled - pos < total)
+        {
+            //Candidate isn't complete yet. Its length byte may be false, so before waiting for more
+            //bytes check whether a complete, valid packet starts later inside the buffer.
+            size_t q = pos + 1;
+            bool found = false;
+            for (; q + 4 <= filled; q++)
+            {
+                if (parseBuffer[q] != 0xA5 || parseBuffer[q + 1] != 0xA5) continue;
+                size_t t2 = parseBuffer[q + 3] + 6;
+                if (filled - q < t2) continue;
+                P_Checksum c2 = Checksum(parseBuffer + q, t2);
+                if (c2.f1 == parseBuffer[q + t2 - 2] && c2.f2 == parseBuffer[q + t2 - 1])
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) break;
+            bytesDiscarded += q - pos; //skip the false candidate
+            pos = q;
+            continue;
+        }
 
         uint8_t pkt[261];
-        std::memcpy(pkt, serial + pos, total);
+        std::memcpy(pkt, parseBuffer + pos, total);
         P_Checksum cs = Checksum(pkt, total);
+    
         if (cs.f1 == pkt[total - 2] && cs.f2 == pkt[total - 1])
         {
+            PacketView view = {};
+            view.type = pkt[2];
+            view.payloadLen = total - 6;
+            //copy out: the view must stay valid after the buffer is shifted below
+            std::memcpy(current, pkt, total);
+            view.payload = current + 4;
+
+            pos += total; //consume the packet and any garbage before it
+
+            std::memmove(parseBuffer, parseBuffer + pos, filled - pos);
+            filled -= pos;
+
             parsePacket(pkt, total);
-            pos += total;
+            return view;
         }
-        else
-        {
-            pos++; // false sync or corrupt packet: skip this byte and rescan
-            bytesDiscarded++;
-        }
+        pos++; // false sync or corrupt packet: skip this byte and rescan
+        bytesDiscarded++;
     }
-    return pos;
+    return {};
+}
+
+PacketView Parser::packet() const   // valid until the next push()
+{
+    return view;
 }
 
 void setFlagsFalse()
@@ -676,22 +732,26 @@ void setFlagsFalse()
 std::unique_ptr<uint8_t[]> makeMsg(uint8_t msg[], int end)
 {
     auto buffer = std::make_unique<uint8_t[]>(end);
-    P_Checksum cs = Checksum(msg, end);
+    
     std::memcpy(buffer.get(), msg, end);
-    buffer[end - 2] = cs.f1;
-    buffer[end - 1] = cs.f2;
+
     int payloadSize = end - 6;
     buffer[3] = payloadSize;
+
+    P_Checksum cs = Checksum(buffer.get(), end);
+
+    buffer[end - 2] = cs.f1;
+    buffer[end - 1] = cs.f2;
 
     return buffer;
 }
 
-bool sendMsg(uint8_t msg[], int end)
+Status sendMsg(uint8_t msg[], int end)
 {
 
     if (serialFd < 0)
     {
-        return false;
+        return Status::portNotOpened;
     } 
     setFlagsFalse();
 
@@ -702,98 +762,138 @@ bool sendMsg(uint8_t msg[], int end)
         if (n < 0)
         {
             if (errno == EINTR) continue;
-            return false;
+            return Status::cannotWrite;
         }
         sent += n;
     }
     tcdrain(serialFd); //wait until all bytes are transmitted
     echo = msg[4];
     
-    return true;
+    return Status::Ok;
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> ping()
+std::pair<std::unique_ptr<uint8_t[]>, Status> ping()
 {
     uint8_t message[8] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x00, 0x00};
     auto msg = makeMsg(message, 8);
-    bool succeeded = sendMsg(msg.get(), 8);
+    Status sts = sendMsg(msg.get(), 8);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> selectSensorData(uint8_t opt1, uint8_t opt2)
+std::pair<std::unique_ptr<uint8_t[]>, Status>selectSensorData(const uint8_t* sensorCodes, int count)
 {
-    uint8_t message[11] = {0xA5, 0xA5, 0x02, 0x05, 0x0C, 0x03, 0x01, opt1, opt2, 0x00, 0x00};
-    auto msg = makeMsg(message, 11);
-    bool succeeded = sendMsg(msg.get(), 11);
+    uint8_t startMessage[7] = {0xA5, 0xA5, 0x02, 0x05, 0x0C, 0x03, 0x01}; //, opt1, opt2, 0x00, 0x00};
+
+    if (count <= 0 || count > 9)
+    {
+        return {nullptr, Status::InvalidArgument};
+    }
+
+    int max = count + 9; //7 header bytes + count codes + 2 checksum bytes
+    auto message = std::make_unique<uint8_t[]>(max);
+
+    for (int i = 0; i < 7; i++)
+    {
+        message[i] = startMessage[i];
+    }
+    message[5] = count + 1; //descriptor length: function byte + sensor codes
+    
+    for (int i = 0; i < count; i++)
+    {
+        switch (sensorCodes[i])
+        {
+        case 0x81:
+        case 0x82:
+        case 0x83:
+        case 0x84:
+        case 0x85:
+        case 0x86:
+        case 0x87:
+        case 0x88:
+        case 0x89:
+            break;
+        default:
+            return {nullptr, Status::InvalidArgument};
+
+        }
+        message[7 + i] = sensorCodes[i];
+    }
+    auto msg = makeMsg(message.get(), max);
+    Status sts = sendMsg(msg.get(), max);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> resetSensorData()
+std::pair<std::unique_ptr<uint8_t[]>, Status> resetSensorData()
 {
     uint8_t message[9] = {0xA5, 0xA5, 0x02, 0x03, 0x0C, 0x01, 0x05, 0x00, 0x00};
     auto msg = makeMsg(message, 9);
-
-    bool succeeded = sendMsg(msg.get(), 9);
+    Status sts = sendMsg(msg.get(), 9);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> resetDevice()
+std::pair<std::unique_ptr<uint8_t[]>, Status> resetDevice()
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, 0x04, 0x00, 0x00, 0x00};
     auto msg = makeMsg(message, 8);
-    bool succeeded = sendMsg(msg.get(), 8);
+    Status sts = sendMsg(msg.get(), 8);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> sendGetDevCmd(uint8_t cmd)
+std::pair<std::unique_ptr<uint8_t[]>, Status> sendGetDevCmd(uint8_t cmd)
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, cmd, 0x00, 0x00, 0x00};
     auto msg = makeMsg(message, 8);
-    bool succeeded = sendMsg(msg.get(), 8);
+    Status sts = sendMsg(msg.get(), 8);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 //ptr good until ??
-std::unique_ptr<uint8_t[]> sendCorrGpsTime(uint8_t WNmsb, uint8_t WNlsb, uint8_t newTimeMSB, uint8_t newTimeB2, uint8_t newTimeB1, uint8_t newTimeLSB)
+std::pair<std::unique_ptr<uint8_t[]>, Status> sendCorrGpsTime(uint8_t WNmsb, uint8_t WNlsb, uint8_t newTimeMSB, uint8_t newTimeB2, uint8_t newTimeB1, uint8_t newTimeLSB)
 {
     uint8_t message[14] = { 0xA5, 0xA5, 0x01, 0x08, 0x09, 0x06, WNmsb, WNlsb, newTimeMSB, newTimeB2, newTimeB1, newTimeLSB, 0x00, 0x00};
     auto msg = makeMsg(message, 14);
-    bool succeeded = sendMsg(msg.get(), 14);
+    Status sts = sendMsg(msg.get(), 14);
+    bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return nullptr;
+        return {nullptr, sts};
     }
-    return msg;
+    return {std::move(msg), sts};
 }
 
 std::unique_ptr<uint8_t[]> getFlags()
 {
-    auto setFlags = std::make_unique<uint8_t[]>(14);
+    auto setFlags = std::make_unique<uint8_t[]>(15);
     
     if (flag_ack){ setFlags[0] = 1; } //ack
     if (flag_devComm){ setFlags[1] = 1; } //"devComm"

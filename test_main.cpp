@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "example.hpp"
 #include <cstring>
+#include "structs.h"
 
 namespace mscip {
 
@@ -384,25 +385,22 @@ protected:
     {
         close(serialFd);
         serialFd = -1;
+        std::cout << "close test" << std::endl;
     }
 };
 
 TEST_F(EncoderTest, encodePing)
 {
     uint8_t pingMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x4F, 0x25};
-    bool b = std::memcmp(ping().get(), pingMsg, sizeof(pingMsg)) == 0;
+    bool b = std::memcmp(ping().first.get(), pingMsg, sizeof(pingMsg)) == 0;
     EXPECT_TRUE(b);
     // EXPECT_EQ(ping(), pingMsg);
 }
-// TEST_F(EncoderTest, encodeSelectSensorData)
-// {
-//     uint8_t selectReply[] = {0xA5, 0xA5, 0x02, 0x06, 0x05, 0x03, 0x01, 0x00, 0x81, 0x82, 0x5E, 0x2E};
-//     EXPECT_EQ(selectSensorData(PE_Scaled_Acc, PE_Scaled_Ang), selectReply);
-// }
 TEST_F(EncoderTest, encodeSelectSensorDataNewSettings)
 {
     uint8_t selectMsg[] = {0xA5, 0xA5, 0x02, 0x05, 0x0C, 0x03, 0x01, 0x81, 0x82, 0x64, 0xF0};
-    bool b = std::memcmp(selectSensorData(PE_Scaled_Acc, PE_Scaled_Ang).get(), selectMsg, sizeof(selectMsg)) == 0;
+    uint8_t cmd[] = {0x81, 0x82};
+    bool b = std::memcmp(selectSensorData(cmd, 2).first.get(), selectMsg, sizeof(selectMsg)) == 0;
     EXPECT_TRUE(b);
     // EXPECT_EQ(selectSensorData(PE_Scaled_Acc, PE_Scaled_Ang), selectMsg);
 }
@@ -410,35 +408,44 @@ TEST_F(EncoderTest, encodeResetSensorData)
 {
     uint8_t resetReply[] = {0xa5, 0xa5, 0x02, 0x03, 0x0c, 0x01, 0x05, 0x61, 0xa2};
     auto msg = resetSensorData();
-    ASSERT_NE(msg, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.get(), resetReply, sizeof(resetReply)));
+    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
+    EXPECT_EQ(0, std::memcmp(msg.first.get(), resetReply, sizeof(resetReply)));
 }
 TEST_F(EncoderTest, encodeGetDevModel)
 {
     uint8_t modelMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x05, 0x00, 0x52, 0x2B}; 
     auto msg = sendGetDevCmd(0x05);
-    ASSERT_NE(msg, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.get(), modelMsg, sizeof(modelMsg)));
+    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
+    EXPECT_EQ(0, std::memcmp(msg.first.get(), modelMsg, sizeof(modelMsg)));
 }
 TEST_F(EncoderTest, encodeGetDevSN)
 {
     uint8_t SNMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x06, 0x00, 0x53, 0x2D};
     auto msg = sendGetDevCmd(0x06);
-    ASSERT_NE(msg, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.get(), SNMsg, sizeof(SNMsg)));
+    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
+    EXPECT_EQ(0, std::memcmp(msg.first.get(), SNMsg, sizeof(SNMsg)));
 }
 TEST_F(EncoderTest, encodeGetDevFW)
 {
     uint8_t FWMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x07, 0x00, 0x54, 0x2F};
     auto msg = sendGetDevCmd(0x07);
-    ASSERT_NE(msg, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.get(), FWMsg, sizeof(FWMsg)));
+    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
+    EXPECT_EQ(0, std::memcmp(msg.first.get(), FWMsg, sizeof(FWMsg)));
 }
-// bool testEncoder()
-// {
-//     //calling send commands generate correct bytes (compared to doc)
-// }
-
+TEST_F(EncoderTest, encodeInvalidSelectSensors_zero)
+{
+    EXPECT_EQ(selectSensorData({}, 0).second, Status::InvalidArgument);
+}
+TEST_F(EncoderTest, encodeInvalidSelectSensors_ten) //redundant with below b/c to have 10 you need an invalid code
+{
+    uint8_t msg[] = {0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a};
+    EXPECT_EQ(selectSensorData(msg, 0).second, Status::InvalidArgument);
+}
+TEST_F(EncoderTest, encodeInvalidSelectSensors_badCmd)
+{
+    uint8_t msg[] = {0x80, 0x81};
+    EXPECT_EQ(selectSensorData(msg, 0).second, Status::InvalidArgument);
+}
 // bool testParser()
 // {
 //     // push packet, then push same packet one byte at a time
@@ -450,6 +457,171 @@ TEST_F(EncoderTest, encodeGetDevFW)
 //     // push max size packet (255)
 // }
 
+class ParserTest : public ::testing::Test {
+protected:
+    Parser parser;
+    uint8_t type = 0x01;
+    uint8_t expPL[22] = {0x80, 0x02, 0x07, 0x00, 0x87, 0x10, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x52, 0x5F, 0x31, 0x5F, 0x32, 0x5F, 0x33};
+    size_t payloadLen = 22;
+    uint8_t toParse[28] = {0xA5, 0xA5, 0x01, 0x16, 0x80, 0x02, 0x07, 0x00, 0x87, 0x10, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x52, 0x5F, 0x31, 0x5F, 0x32, 0x5F, 0x33, 0xA6, 0x25};
+
+    static void SetUpTestSuite()
+    {
+        close(serialFd);
+    }
+
+    static void TearDownTestSuite()
+    {
+        
+    }
+};
+
+TEST_F(ParserTest, parseControl)
+{
+    
+    auto pack = parser.push(toParse, 28);
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+TEST_F(ParserTest, parseOneByOne)
+{
+    for (int i = 0; i < 27; i++)
+    {
+        uint8_t b[1] = {toParse[i]};
+        parser.push(b, 1);
+    }
+    uint8_t b[1] = {toParse[27]};
+    auto pack = parser.push(b, 1);
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+TEST_F(ParserTest, parseAllSplits)
+{
+    for (int i = 1; i < 27; i++)
+    {
+        uint8_t firstPart[i];
+        std::memcpy(firstPart, toParse, i);
+        parser.push(firstPart, i);
+
+        uint8_t secondPart[i];
+        std::memcpy(secondPart, toParse + i, sizeof(toParse) - i);
+        auto pack = parser.push(secondPart, sizeof(toParse) - i);
+
+        EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen << " i = " << i;
+        for (int i = 0; i < payloadLen; i++)
+        {
+            EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+        }
+        
+        EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+
+    }  
+}
+
+TEST_F(ParserTest, parseStartGarbage)
+{
+    uint8_t garbage[7] = {0x56, 0x55, 0x5a, 0xa5, 0x87, 0x99, 0xb2};
+
+    uint8_t startsWithGarbage[sizeof(toParse) + sizeof(garbage)];
+    std::memcpy(startsWithGarbage, garbage, sizeof(garbage));
+    std::memcpy(startsWithGarbage + sizeof(garbage), toParse, sizeof(toParse));
+
+    auto pack = parser.push(startsWithGarbage, sizeof(startsWithGarbage));
+
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+// TEST_F(ParserTest, parseBetweenGarbage)
+// {
+//     auto pack0 = parser.push(toParse, 28);
+
+//     uint8_t garbage[7] = {0x56, 0x55, 0x5a, 0xa5, 0x87, 0x99, 0xb2};
+//     parser.push(garbage, 7);
+
+//     auto pack = parser.push(toParse, 28);
+//     EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+//     for (int i = 0; i < payloadLen; i++)
+//     {
+//         EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+//     }
+//     EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+// }
+TEST_F(ParserTest, parseEndGarbage)
+{
+    uint8_t garbage[7] = {0x56, 0x55, 0x5a, 0xa5, 0x87, 0x99, 0xb2};
+
+    uint8_t endsWithGarbage[sizeof(toParse) + sizeof(garbage)];
+    std::memcpy(endsWithGarbage, toParse, sizeof(toParse));
+    std::memcpy(endsWithGarbage + sizeof(toParse), garbage, sizeof(garbage));
+
+    auto pack = parser.push(endsWithGarbage, sizeof(endsWithGarbage));
+
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i] << " i = " << i << " payloadLen = " << payloadLen;
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+TEST_F(ParserTest, parseBadChecksum)
+{
+    size_t size = sizeof(toParse);
+    uint8_t badThenGood[2 * size];
+    std::memcpy(badThenGood, toParse, size);
+    badThenGood[size - 1] = 0x00; //corrupt the checksum
+    std::memcpy(badThenGood + size, toParse, size); //good packet
+    auto pack = parser.push(badThenGood, sizeof(badThenGood));
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+TEST_F(ParserTest, parseFalseLong)
+{
+    uint8_t falseLong[] = {0x88, 0xa5, 0xa5, 0x01, 0x80, 0x81, 0x0c, 0x55, 0x54, 0x7b, 0x98};
+    uint8_t toSend[sizeof(falseLong) + sizeof(toParse)];
+    std::memcpy(toSend, falseLong, sizeof(falseLong));
+    std::memcpy(toSend + sizeof(falseLong), toParse, sizeof(toParse));
+    auto pack = parser.push(toSend, sizeof(toSend));
+    EXPECT_EQ(pack.type, type) << "type = " << pack.type;
+    for (int i = 0; i < payloadLen; i++)
+    {
+        EXPECT_EQ(pack.payload[i], expPL[i]) << "pl = " << pack.payload[i] << " exp = " << expPL[i];
+    }
+    EXPECT_EQ(pack.payloadLen, payloadLen) << "len = " << pack.payloadLen;
+}
+TEST_F(ParserTest, parseMax)
+{
+    // uint8_t bufMax[255];
+    // std::memset(bufMax, 0, sizeof(bufMax));
+    // bufMax[0] = 0xa5; bufMax[1] = 0xa5; bufMax[2] = 0xa2;
+    // auto msg = makeMsg(bufMax, sizeof(bufMax));
+    // auto pack = parser.push(bufMax, sizeof(bufMax));
+
+    uint8_t bufMax[255];
+    std::memset(bufMax, 0, sizeof(bufMax));
+    bufMax[0] = 0xa5; bufMax[1] = 0xa5; bufMax[2] = 0xa2;
+    auto msg = makeMsg(bufMax, sizeof(bufMax));
+    
+    auto pack = parser.push(msg.get(), sizeof(bufMax));
+
+    EXPECT_NE(pack.type, 0x00);
+    EXPECT_NE(pack.payloadLen, 0x00) << "len = " << pack.payloadLen;
+}
 // bool testFieldIterator()
 // {
 //     //??

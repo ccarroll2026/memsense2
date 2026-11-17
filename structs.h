@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <ostream>
 
+enum class Status : uint8_t { Ok, BufferTooSmall, InvalidArgument, Malformed, WrongMessage, portNotOpened, cannotWrite, incompleteMessage };
+
 enum P_Msg_Type {
     PE_Basic_Msg = 0x01,
     PE_IMU_Msg = 0x02,
@@ -152,6 +154,8 @@ enum P_Expect_Struct {
     PE_Time_Data = 0x88
 };
 
+struct PacketView { uint8_t type; const uint8_t* payload; uint8_t payloadLen; };
+
 //Message Structs
 
 struct P_Msg {
@@ -232,4 +236,4 @@ struct P_Time_Data {
 };
 
 
-#endif //P_structs
+#endif
