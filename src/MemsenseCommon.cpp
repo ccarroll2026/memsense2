@@ -1,33 +1,11 @@
-#include <vector>
 #include <cstdint>
-#include <iostream>
 #include <iterator>
-#include <iomanip>
-#include <unistd.h>
-#include <termios.h>
-#include <cerrno>
 #include <cstring>
-#include <memory>
 
-#include "structs.h"
-#include "MemsenseCommon.hpp"
+#include "mscip/structs.h"
+#include "mscip/MemsenseCommon.hpp"
 
 namespace mscip {
-
-int serialFd = -1; //set by the caller after opening the port
-
-namespace {
-    uint8_t echo; //last command sent, for verification
-
-    int packetsAccepted = 0;
-    int checksumFailures = 0;
-    int bytesDiscarded = 0;
-
-}
-
-int getPacketsAccepted(){return packetsAccepted;}
-int getchecksumFailures(){return checksumFailures;}
-int getBytesDiscarded(){return bytesDiscarded;}
 
 P_Checksum Checksum(uint8_t buf[261], int end)
 {    
@@ -47,49 +25,35 @@ P_Checksum Checksum(uint8_t buf[261], int end)
     return result;
 }
 
-//Checks if packet is valid
-bool goodPacket(uint8_t packet[261], int end)
-{
-    bool headerGood = (packet[0] == 0xA5 && packet[1] == 0xA5); //correct start
-    
-    bool payloadSizeGood = packet[3] == (end - 6); //correct size
-
-    P_Checksum expectedChecksum = Checksum(packet, end); //calc checksum
-    auto f1 = packet[end -2];
-    auto f2 = packet[end -1];
-    bool csGood = (expectedChecksum.f1 == f1 && expectedChecksum.f2 == f2); //correct checksum
-
-    if (!csGood)
-    {
-        checksumFailures++;
-    }
-
-    bool passed = headerGood && payloadSizeGood && csGood;
-    return(passed);
-}
+int Parser::getPacketsAccepted(){return packetsAccepted;}
+int Parser::getchecksumFailures(){return checksumFailures;}
+int Parser::getBytesDiscarded(){return bytesDiscarded;}
 
 // Returns true when a validated packet is ready; read it with packet().
-PacketView Parser::push(uint8_t bytes[], int n)
+int Parser::push(uint8_t bytes[], int n, void (*callbackFunc(PacketView)))
 {
+    int numPackets = 0;
     if (filled + n > sizeof(parseBuffer))
     {
         size_t drop = filled + n - sizeof(parseBuffer); //discard oldest bytes to make room
         if (drop > filled) drop = filled;
         std::memmove(parseBuffer, parseBuffer + drop, filled - drop);
         filled -= drop;
-        bytesDiscarded += drop;
+        bytesDiscarded += static_cast<int>(drop);
     }
-    if (static_cast<size_t>(n) > sizeof(parseBuffer)) return {};
+    if (static_cast<size_t>(n) > sizeof(parseBuffer) - filled) return {};
     std::memcpy(parseBuffer + filled, bytes, n);
     filled += n;
     //drain every complete packet in the buffer; return the last one found
     PacketView last = {};
     for (PacketView p = parsing(); p.payload != nullptr; p = parsing())
     {
+        numPackets++;
+        callbackFunc(p);
         last = p;
     }
 
-    return last;
+    return numPackets;
 }
 
 PacketView Parser::parsing()
@@ -104,13 +68,22 @@ PacketView Parser::parsing()
             sync++;
             bytesDiscarded++;
         }
-        if (sync >= filled){
-            break;}
+        if (sync >= filled)
+        {
+            break;
+        }
         pos = sync;
-        if (filled - pos < 4) {
-            break;}
+        if (filled - pos < 4) 
+        {
+            break;
+        }
 
         size_t total = parseBuffer[pos + 3] + 6;
+        if (total > 255)
+        {
+            break;
+        }
+
         if (filled - pos < total)
         {
             //Candidate isn't complete yet. Its length byte may be false, so before waiting for more
@@ -122,7 +95,7 @@ PacketView Parser::parsing()
                 if (parseBuffer[q] != 0xA5 || parseBuffer[q + 1] != 0xA5) continue;
                 size_t t2 = parseBuffer[q + 3] + 6;
                 if (filled - q < t2) continue;
-                P_Checksum c2 = Checksum(parseBuffer + q, t2);
+                P_Checksum c2 = Checksum(parseBuffer + q, static_cast<int>(t2));
                 if (c2.f1 == parseBuffer[q + t2 - 2] && c2.f2 == parseBuffer[q + t2 - 1])
                 {
                     found = true;
@@ -130,20 +103,20 @@ PacketView Parser::parsing()
                 }
             }
             if (!found) break;
-            bytesDiscarded += q - pos; //skip the false candidate
+            bytesDiscarded += static_cast<int>(q - pos); //skip the false candidate
             pos = q;
             continue;
         }
 
         uint8_t pkt[261];
         std::memcpy(pkt, parseBuffer + pos, total);
-        P_Checksum cs = Checksum(pkt, total);
+        P_Checksum cs = Checksum(pkt, static_cast<int>(total));
     
         if (cs.f1 == pkt[total - 2] && cs.f2 == pkt[total - 1])
         {
             PacketView view = {};
             view.type = pkt[2];
-            view.payloadLen = total - 6;
+            view.payloadLen = static_cast<uint8_t>(total - 6);
             //copy out: the view must stay valid after the buffer is shifted below
             std::memcpy(current, pkt, total);
             view.payload = current + 4;
@@ -170,7 +143,7 @@ void makeMsg(uint8_t* msg, int end)
 {
 
     int payloadSize = end - 6;
-    msg[3] = payloadSize;
+    msg[3] = static_cast<uint8_t>(payloadSize);
 
     P_Checksum cs = Checksum(msg, end);
 
@@ -178,41 +151,12 @@ void makeMsg(uint8_t* msg, int end)
     msg[end - 1] = cs.f2;
 }
 
-Status sendMsg(uint8_t* msg, int end)
-{
-
-    if (serialFd < 0)
-    {
-        return Status::portNotOpened;
-    } 
-
-    size_t sent = 0;
-    while (sent < end)
-    {
-        ssize_t n = write(serialFd, msg + sent, end - sent);
-        if (n < 0)
-        {
-            if (errno == EINTR) continue;
-            return Status::cannotWrite;
-        }
-        sent += n;
-    }
-    tcdrain(serialFd); //wait until all bytes are transmitted
-    echo = msg[4];
-    
-    return Status::Ok;
-}
 
 Status ping(uint8_t* res, size_t size)
 {
     uint8_t message[8] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x00, 0x00};
     makeMsg(message, 8);
-    Status sts = sendMsg(message, 8);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
+    Status sts = Status::Ok;
     if (sizeof(message) > size)
     {
         sts = Status::BufferTooSmall;
@@ -223,7 +167,8 @@ Status ping(uint8_t* res, size_t size)
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, sizeof(message));
+    std::memcpy(res, message, size);
+
     return sts;
 }
 
@@ -237,13 +182,13 @@ Status selectSensorData(const uint8_t* sensorCodes, int count, uint8_t* res, siz
     }
 
     int max = count + 9; //7 header bytes + count codes + 2 checksum bytes
-    uint8_t message[max];
+    uint8_t message[18]; //count is 7 header + 9 codes + 2 checksum bytes
 
     for (int i = 0; i < 7; i++)
     {
         message[i] = startMessage[i];
     }
-    message[5] = count + 1; //descriptor length: function byte + sensor codes
+    message[5] = static_cast<uint8_t>(count + 1); //descriptor length: function byte + sensor codes
     
     for (int i = 0; i < count; i++)
     {
@@ -266,23 +211,19 @@ Status selectSensorData(const uint8_t* sensorCodes, int count, uint8_t* res, siz
         message[7 + i] = sensorCodes[i];
     }
     makeMsg(message, max);
-    Status sts = sendMsg(message, max);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
-    if (max > size)
+    Status sts = Status::Ok;
+    if (static_cast<size_t>(max) > size)
     {
         sts = Status::BufferTooSmall;
         return sts;
     }
-    if (max < size)
+    if (static_cast<size_t>(max) < size)
     {
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, max);
+    std::memcpy(res, message, size);
+
     return sts;
 }
 
@@ -290,12 +231,7 @@ Status resetSensorData(uint8_t* res, size_t size)
 {
     uint8_t message[9] = {0xA5, 0xA5, 0x02, 0x03, 0x0C, 0x01, 0x05, 0x00, 0x00};
     makeMsg(message, 9);
-    Status sts = sendMsg(message, 9);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
+    Status sts = Status::Ok;
     if (sizeof(message) > size)
     {
         sts = Status::BufferTooSmall;
@@ -306,7 +242,8 @@ Status resetSensorData(uint8_t* res, size_t size)
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, sizeof(message));
+    std::memcpy(res, message, size);
+
     return sts;
 }
 
@@ -314,12 +251,8 @@ Status resetDevice(uint8_t* res, size_t size)
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, 0x04, 0x00, 0x00, 0x00};
     makeMsg(message, 8);
-    Status sts = sendMsg(message, 8);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
+    Status sts = Status::Ok;
+    
     if (sizeof(message) > size)
     {
         sts = Status::BufferTooSmall;
@@ -330,7 +263,8 @@ Status resetDevice(uint8_t* res, size_t size)
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, sizeof(message));
+    std::memcpy(res, message, size);
+
     return sts;
 }
 
@@ -338,12 +272,8 @@ Status sendGetDevCmd(uint8_t cmd, uint8_t* res, size_t size)
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, cmd, 0x00, 0x00, 0x00};
     makeMsg(message, 8);
-    Status sts = sendMsg(message, 8);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
+    Status sts = Status::Ok;
+    
     if (sizeof(message) > size)
     {
         sts = Status::BufferTooSmall;
@@ -354,7 +284,8 @@ Status sendGetDevCmd(uint8_t cmd, uint8_t* res, size_t size)
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, sizeof(message));
+    std::memcpy(res, message, size);
+
     return sts;
 }
 
@@ -368,12 +299,8 @@ Status sendCorrGpsTime(uint8_t* vals, size_t vSize, uint8_t* res, size_t size)
     uint8_t message[14] = { 0xA5, 0xA5, 0x01, 0x08, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     std::memcpy(message + 7, vals, vSize);
     makeMsg(message, 14);
-    Status sts = sendMsg(message, 14);
-    bool succeeded = sts == Status::Ok;
-    if (!succeeded)
-    {
-        return sts;
-    }
+    Status sts = Status::Ok;
+    
     if (sizeof(message) > size)
     {
         sts = Status::BufferTooSmall;
@@ -384,26 +311,14 @@ Status sendCorrGpsTime(uint8_t* vals, size_t vSize, uint8_t* res, size_t size)
         sts = Status::BufferTooBig;
         return sts;
     }
-    std::memcpy(res, message, sizeof(message));
+    std::memcpy(res, message, size);
+
     return sts;
 }
-
-
-// explicit FieldIterator(const PacketView& p);
-// bool next(Field& out);       // false at end of payload or on a malformed field
-// bool malformed() const;
-
-// Field FieldIterator::firstField()
-// {
-//     Field firstField = getField(0);
-    
-//     return firstField
-// }
 
 Field FieldIterator::getField(size_t pos)
 {
     Field f;
-
     f.size = pl[pos + 1];
 
     if (pos + 2 + f.size > plSize)
@@ -417,7 +332,7 @@ Field FieldIterator::getField(size_t pos)
 
     f.data = &pl[pos + 2];
 
-    if (pos + f.size < plSize - 2)
+    if (pos + f.size + 2 < plSize)
     {
         //next = position in p where next field starts
         

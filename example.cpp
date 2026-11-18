@@ -4,12 +4,52 @@
 #include <stdexcept>
 #include <cstdint>
 #include <iomanip>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <vector>
 
-#include "structs.h"
-#include "MemsenseCommon.hpp"
-#include "example.hpp"
+#include "mscip/structs.h"
+#include "mscip/MemsenseCommon.hpp"
 
 namespace mscip{
+
+int serialFd;
+
+std::vector<PacketView> packets;
+
+int openSerial()
+{
+    int fd = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
+    if (fd < 0) {
+        std::cerr << "Error opening serial port" << std::endl;
+        std::cout << errno << std::endl;
+        return 1;
+    }
+    struct termios tty;
+    tcgetattr(fd, &tty);
+    cfmakeraw(&tty); // disable ICRNL/IXON/ICANON etc. so binary bytes pass through untouched
+    cfsetspeed(&tty, B115200);
+    tty.c_cflag |= (CLOCAL | CREAD);
+    tty.c_cc[VMIN] = 1;
+    tty.c_cc[VTIME] = 0;
+    tty.c_cflag &= ~CRTSCTS; // no hardware flow control
+    tcsetattr(fd, TCSANOW, &tty);
+    // The device only answers commands with DTR and RTS asserted
+    int modem = TIOCM_DTR | TIOCM_RTS;
+    ioctl(fd, TIOCMBIS, &modem);
+    usleep(200000); // let the lines settle
+    tcflush(fd, TCIFLUSH);
+    serialFd = fd;
+    return 0;
+}
+
+void* receivePacket(PacketView pack)
+{
+    packets.push_back(pack);
+    return nullptr;
+}
 
 int readSerial()
 {
@@ -19,21 +59,43 @@ int readSerial()
         return 1;
     }
 
-    // uint8_t hold[261];
     uint8_t buf[256];
     int tries = 3;
-    // int end = 0;
     Parser parser;
 
     while (tries > 0) {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0) {
-            parser.push(buf, n);
+            parser.push(buf, n, &receivePacket);
         }
         tries--;
     }
 
     return 0;
+}
+
+Status writeSerial(uint8_t* msg, size_t size)
+{
+    if (serialFd < 0)
+    {
+        return Status::portNotOpened;
+    } 
+
+    size_t sent = 0;
+    while (sent < static_cast<size_t>(size))
+    {
+        ssize_t n = write(serialFd, msg + sent, size - sent);
+        if (n < 0)
+        {
+            if (errno == EINTR) continue;
+            return Status::cannotWrite;
+        }
+        sent += n;
+    }
+    tcdrain(serialFd); //wait until all bytes are transmitted
+    
+    return Status::Ok;
+
 }
 
 std::string StatusToString(Status stat)
@@ -61,46 +123,6 @@ std::string StatusToString(Status stat)
     }
 }
 
-void testCommands()
-{
-    // std::cout << "Ping ";
-    // auto res = ping();
-    // std::cout << StatusToString(res.second) << std::endl;
-    // readSerial();
-    
-    // std::cout << "selectSensors Acc Ang ";
-    // uint8_t msg[2] = {0x81, 0x82};
-    // auto res1 = selectSensorData(msg, 2);
-    // std::cout << StatusToString(res1.second) << std::endl;
-    // readSerial();
-    
-
-    // std::cout << "selectSensors Temp Time ";
-    // uint8_t msg1[2] = {0x87, 0x88};
-    // auto res2 = selectSensorData(msg1, 2);
-    // std::cout << StatusToString(res2.second) << std::endl;
-    // readSerial();
-
-    // std::cout << "selectSensors Delta theta/vel ";
-    // uint8_t msg2[2] = {0x84, 0x85};
-    // auto res3 = selectSensorData(msg2, 2);
-    // std::cout << StatusToString(res3.second) << std::endl;
-    // readSerial();
-
-    // std::cout << "reset sensors data ";
-    // auto res4 = resetSensorData();
-    // std::cout << StatusToString(res4.second) << std::endl;
-    // readSerial();
-
-    // std::cout << "reset sensors data ";
-    // auto res5 = sendGetDevCmd(PE_Get_Dev_Cal);
-    // std::cout << StatusToString(res5.second) << std::endl;
-    // readSerial();
-
-    // std::cout << "packets accepted = " << getPacketsAccepted() << std::endl;
-    // std::cout << "checksum fails = " << getchecksumFailures() << std::endl;
-    // std::cout << "bytes discarded = " << getBytesDiscarded() << std::endl;
-}
 
 } // namespace mscip
 
@@ -109,18 +131,12 @@ int main()
     using namespace mscip;
     if (openSerial() != 0) return 1;
     
-    testCommands();
+    //example use of library
+    //make message, writeSerial, readSerial, parse serial, 
 
     close(serialFd);
     serialFd = -1;
 
-    Parser parser;
-
-    uint8_t pingReply[] = {0xA5, 0xA5, 0x01, 0x04, 0x80, 0x02, 0x02, 0x00, 0xD3, 0xCF};
-    auto pack = parser.push(pingReply, sizeof(pingReply));
-    FieldIterator iterator(pack);
-
-    Field firstField = iterator.getField(0);
     
     return 0;
 }

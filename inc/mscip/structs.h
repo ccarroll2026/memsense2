@@ -2,7 +2,6 @@
 #define P_structs
 
 #include <cstdint>
-#include <ostream>
 
 enum class Status : uint8_t { Ok, BufferTooSmall, BufferTooBig, InvalidArgument, Malformed, portNotOpened, cannotWrite, incompleteMessage };
 
@@ -156,87 +155,13 @@ enum P_Expect_Struct {
 
 struct PacketView { uint8_t type; const uint8_t* payload; uint8_t payloadLen; };
 
-//Message Structs
-
-// struct P_Msg {
-//     uint8_t msg_code;
-//     uint8_t msg_size;
-// };
-
 struct P_Checksum {
     uint8_t f1;
     uint8_t f2;
 
-    friend std::ostream& operator<<(std::ostream& os, const P_Checksum& u)
-    {
-        os << std::hex <<
-        static_cast<int>(u.f1) << ", " << 
-        static_cast<int>(u.f2) << "\n" <<
-        std::endl;
-        return os;
-    }
 };
 
 struct Field      
 { uint8_t type; uint8_t code; uint8_t size; const uint8_t* data; };
-
-// /*--------------------------------------*/
-// struct P_Error {
-//     P_Msg msg;
-//     uint8_t echo;
-//     uint8_t errorCode;
-//     friend std::ostream& operator<<(std::ostream& os, const P_Error u)
-//     {
-//         os << std::hex <<
-//         static_cast<int>(u.msg.msg_code) << ", " << 
-//         static_cast<int>(u.msg.msg_size) << ", " << 
-//         static_cast<int>(u.echo) << ", " << 
-//         static_cast<int>(u.errorCode) << "\n" <<
-//         std::endl;
-//         return os;
-//     }
-// };
-
-// //TODO: can be more commands than 4...
-// struct P_Device_Msg_Reply {
-//     P_Msg msg;
-//     uint8_t cmd1[2];
-//     uint8_t cmd2[2];
-//     uint8_t cmd3[2];
-//     uint8_t cmd4[2];
-// };
-
-// struct P_Get_Device_Reply {
-//     P_Msg msg;
-//     uint8_t s[16];
-// };
-
-// struct P_Correlate_Time_Cmd {
-//     P_Msg msg;
-//     uint8_t GPS_WN[2];
-//     uint8_t NTV[4];
-// };
-
-// /*--------------------------------------*/
-
-// struct P_Scaled_Vec {
-//     P_Msg msg;
-//     uint8_t X[4];
-//     uint8_t Y[4];
-//     uint8_t Z[4];
-// };
-
-// struct P_Scaled_Single {
-//     P_Msg msg;
-//     uint8_t X[4];
-// };
-
-// struct P_Time_Data {
-//     P_Msg msg;
-//     uint8_t GPS_SOW[8];
-//     uint8_t WN[2];
-//     uint8_t timestamp_flag[2];
-// };
-
 
 #endif
