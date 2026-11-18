@@ -25,22 +25,6 @@ namespace {
 
 }
 
-// P_Error get_ack() {return ack;}
-// P_Device_Msg_Reply get_devComm(){return devComm;}
-// P_Get_Device_Reply getDevMod(){return devMod;}
-// P_Get_Device_Reply getDevSN(){return devSN;}
-// P_Get_Device_Reply getDevFW(){return devFW;}
-// P_Get_Device_Reply getDevCalDate(){return devCalDate;}
-// P_Scaled_Vec getAccVec(){return accVec;}
-// P_Scaled_Vec getAngVec(){return angVec;}
-// P_Scaled_Vec getMagVec(){return magVec;}
-// P_Scaled_Vec getDTVec(){return deltaThetaVec;}
-// P_Scaled_Vec getDVVec(){return deltaVelVec;}
-// P_Scaled_Single getPressure(){return pressure;}
-// P_Scaled_Single getTemperature(){return temperature;}
-// P_Time_Data getTimeData(){return gpsCorrTime;}
-// P_Scaled_Vec getAuxAcc(){return auxAccVec;}
-
 int getPacketsAccepted(){return packetsAccepted;}
 int getchecksumFailures(){return checksumFailures;}
 int getBytesDiscarded(){return bytesDiscarded;}
@@ -82,63 +66,6 @@ bool goodPacket(uint8_t packet[261], int end)
 
     bool passed = headerGood && payloadSizeGood && csGood;
     return(passed);
-}
-
-Status parsePacket(uint8_t buf[261], int end)
-{
-    if (end != buf[3] + 6)
-    {
-        return Status::Malformed;
-    }
-
-    if(!goodPacket(buf, end))
-    {
-        return Status::Malformed;
-    }
-    
-    uint8_t type = buf[2];
-
-    uint8_t dataLen = buf[5];
-    int dl = static_cast<int>(dataLen);
-
-    //stop if message isnt whole
-    if (end - 6 <= dl)
-    {
-        return Status::incompleteMessage;
-    }
-
-    //for each distinct* portion of the message (*has its own message code and size)
-    bool complete = false;
-    int start = 0;
-
-    while (!complete)
-    {
-        //grab first portion into msg
-        dataLen = buf[start + 5];
-        dl = static_cast<int>(dataLen);
-
-        uint8_t msg[261];
-        std::memcpy(msg, buf + start + 4, dl + 6);
-        //load message into struct instance
-        // if(!toStruct(type, msg, dl + 2))
-        // {
-        //     return Status::InvalidArgument;
-        // }
-
-        //field iterator ??
-
-        //get rid of processed data from front
-        start += dl + 2;
-        
-        //if nothig left to process, exit while loop
-        if (start >= end - 9){
-            complete = true;
-            packetsAccepted++;
-        }
-
-    }
-
-    return Status::Ok;
 }
 
 // Returns true when a validated packet is ready; read it with packet().
@@ -226,7 +153,6 @@ PacketView Parser::parsing()
             std::memmove(parseBuffer, parseBuffer + pos, filled - pos);
             filled -= pos;
 
-            parsePacket(pkt, total);
             return view;
         }
         pos++; // false sync or corrupt packet: skip this byte and rescan
@@ -240,24 +166,19 @@ PacketView Parser::packet() const   // valid until the next push()
     return view;
 }
 
-std::unique_ptr<uint8_t[]> makeMsg(uint8_t msg[], int end)
+void makeMsg(uint8_t* msg, int end)
 {
-    auto buffer = std::make_unique<uint8_t[]>(end);
-    
-    std::memcpy(buffer.get(), msg, end);
 
     int payloadSize = end - 6;
-    buffer[3] = payloadSize;
+    msg[3] = payloadSize;
 
-    P_Checksum cs = Checksum(buffer.get(), end);
+    P_Checksum cs = Checksum(msg, end);
 
-    buffer[end - 2] = cs.f1;
-    buffer[end - 1] = cs.f2;
-
-    return buffer;
+    msg[end - 2] = cs.f1;
+    msg[end - 1] = cs.f2;
 }
 
-Status sendMsg(uint8_t msg[], int end)
+Status sendMsg(uint8_t* msg, int end)
 {
 
     if (serialFd < 0)
@@ -282,32 +203,41 @@ Status sendMsg(uint8_t msg[], int end)
     return Status::Ok;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status> ping()
+Status ping(uint8_t* res, size_t size)
 {
     uint8_t message[8] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x00, 0x00};
-    auto msg = makeMsg(message, 8);
-    Status sts = sendMsg(msg.get(), 8);
+    makeMsg(message, 8);
+    Status sts = sendMsg(message, 8);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (sizeof(message) > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    else if (sizeof(message) < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, sizeof(message));
+    return sts;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status>selectSensorData(const uint8_t* sensorCodes, int count)
+Status selectSensorData(const uint8_t* sensorCodes, int count, uint8_t* res, size_t size)
 {
     uint8_t startMessage[7] = {0xA5, 0xA5, 0x02, 0x05, 0x0C, 0x03, 0x01}; //, opt1, opt2, 0x00, 0x00};
 
     if (count <= 0 || count > 9)
     {
-        return {nullptr, Status::InvalidArgument};
+        return Status::InvalidArgument;
     }
 
     int max = count + 9; //7 header bytes + count codes + 2 checksum bytes
-    auto message = std::make_unique<uint8_t[]>(max);
+    uint8_t message[max];
 
     for (int i = 0; i < 7; i++)
     {
@@ -330,75 +260,132 @@ std::pair<std::unique_ptr<uint8_t[]>, Status>selectSensorData(const uint8_t* sen
         case 0x89:
             break;
         default:
-            return {nullptr, Status::InvalidArgument};
+            return Status::InvalidArgument;
 
         }
         message[7 + i] = sensorCodes[i];
     }
-    auto msg = makeMsg(message.get(), max);
-    Status sts = sendMsg(msg.get(), max);
+    makeMsg(message, max);
+    Status sts = sendMsg(message, max);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (max > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    if (max < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, max);
+    return sts;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status> resetSensorData()
+Status resetSensorData(uint8_t* res, size_t size)
 {
     uint8_t message[9] = {0xA5, 0xA5, 0x02, 0x03, 0x0C, 0x01, 0x05, 0x00, 0x00};
-    auto msg = makeMsg(message, 9);
-    Status sts = sendMsg(msg.get(), 9);
+    makeMsg(message, 9);
+    Status sts = sendMsg(message, 9);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (sizeof(message) > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    else if (sizeof(message) < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, sizeof(message));
+    return sts;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status> resetDevice()
+Status resetDevice(uint8_t* res, size_t size)
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, 0x04, 0x00, 0x00, 0x00};
-    auto msg = makeMsg(message, 8);
-    Status sts = sendMsg(msg.get(), 8);
+    makeMsg(message, 8);
+    Status sts = sendMsg(message, 8);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (sizeof(message) > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    else if (sizeof(message) < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, sizeof(message));
+    return sts;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status> sendGetDevCmd(uint8_t cmd)
+Status sendGetDevCmd(uint8_t cmd, uint8_t* res, size_t size)
 {
     uint8_t message[8] = { 0xA5, 0xA5, 0x01, 0x02, cmd, 0x00, 0x00, 0x00};
-    auto msg = makeMsg(message, 8);
-    Status sts = sendMsg(msg.get(), 8);
+    makeMsg(message, 8);
+    Status sts = sendMsg(message, 8);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (sizeof(message) > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    else if (sizeof(message) < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, sizeof(message));
+    return sts;
 }
 
-//ptr good until ??
-std::pair<std::unique_ptr<uint8_t[]>, Status> sendCorrGpsTime(uint8_t WNmsb, uint8_t WNlsb, uint8_t newTimeMSB, uint8_t newTimeB2, uint8_t newTimeB1, uint8_t newTimeLSB)
+// uint8_t WNmsb, uint8_t WNlsb, uint8_t newTimeMSB, uint8_t newTimeB2, uint8_t newTimeB1, uint8_t newTimeLSB,
+Status sendCorrGpsTime(uint8_t* vals, size_t vSize, uint8_t* res, size_t size)
 {
-    uint8_t message[14] = { 0xA5, 0xA5, 0x01, 0x08, 0x09, 0x06, WNmsb, WNlsb, newTimeMSB, newTimeB2, newTimeB1, newTimeLSB, 0x00, 0x00};
-    auto msg = makeMsg(message, 14);
-    Status sts = sendMsg(msg.get(), 14);
+    if (vSize != 6)
+    {
+        return Status::InvalidArgument;
+    }
+    uint8_t message[14] = { 0xA5, 0xA5, 0x01, 0x08, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    std::memcpy(message + 7, vals, vSize);
+    makeMsg(message, 14);
+    Status sts = sendMsg(message, 14);
     bool succeeded = sts == Status::Ok;
     if (!succeeded)
     {
-        return {nullptr, sts};
+        return sts;
     }
-    return {std::move(msg), sts};
+    if (sizeof(message) > size)
+    {
+        sts = Status::BufferTooSmall;
+        return sts;
+    }
+    else if (sizeof(message) < size)
+    {
+        sts = Status::BufferTooBig;
+        return sts;
+    }
+    std::memcpy(res, message, sizeof(message));
+    return sts;
 }
 
 

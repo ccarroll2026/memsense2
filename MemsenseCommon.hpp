@@ -8,15 +8,14 @@ namespace mscip {
 extern int serialFd;
 P_Checksum Checksum(uint8_t buf[261], int end);
 bool goodPacket(uint8_t packet[261], int end);
-Status parsePacket(uint8_t buf[261], int end);
-std::unique_ptr<uint8_t[]> makeMsg(uint8_t msg[], int end);
-Status sendMsg(uint8_t msg[], int end);
-std::pair<std::unique_ptr<uint8_t[]>, Status> ping();
-std::pair<std::unique_ptr<uint8_t[]>, Status> selectSensorData(const uint8_t* sensorCodes, int count);
-std::pair<std::unique_ptr<uint8_t[]>, Status> resetSensorData();
-std::pair<std::unique_ptr<uint8_t[]>, Status> resetDevice();
-std::pair<std::unique_ptr<uint8_t[]>, Status> sendGetDevCmd(uint8_t cmd);
-std::pair<std::unique_ptr<uint8_t[]>, Status> sendCorrGpsTime(uint8_t WNmsb, uint8_t WNlsb, uint8_t newTimeMSB, uint8_t newTimeB2, uint8_t newTimeB1, uint8_t newTimeLSB);
+void makeMsg(uint8_t* msg, int end);
+Status sendMsg(uint8_t* msg, int end);
+Status ping(uint8_t* res, size_t size);
+Status selectSensorData(const uint8_t* sensorCodes, int count, uint8_t* res, size_t size);
+Status resetSensorData(uint8_t* res, size_t size);
+Status resetDevice(uint8_t* res, size_t size);
+Status sendGetDevCmd(uint8_t cmd, uint8_t* res, size_t size);
+Status sendCorrGpsTime(uint8_t* vals, size_t vSize, uint8_t* res, size_t size);
 
 
 int getPacketsAccepted();
@@ -32,21 +31,18 @@ private:
     size_t filled = 0;
     uint8_t current[261]; //copy of the last validated packet; PacketView points into it
     PacketView view = {};
+    PacketView parsing(); //internal function to handle packet parsing
 
 public:
-    // Returns true when a validated packet is ready; read it with packet().
+    // Returns PacketView when a full packet is found, returns an empty one if not
     PacketView push(uint8_t bytes[], int n);
-    PacketView parsing();
-    PacketView packet() const;   // valid until the next push()
+    PacketView packet() const;   // valid until the next push(); returns view
 };
 #endif
 
 class FieldIterator {
 public:
-    // explicit FieldIterator(const PacketView& p);
-    // bool next(Field& out);       // false at end of payload or on a malformed field
-    // bool malformed() const;
-
+    
     uint8_t FiType;
     const uint8_t* pl;
     uint8_t plSize;

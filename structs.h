@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <ostream>
 
-enum class Status : uint8_t { Ok, BufferTooSmall, InvalidArgument, Malformed, WrongMessage, portNotOpened, cannotWrite, incompleteMessage };
+enum class Status : uint8_t { Ok, BufferTooSmall, BufferTooBig, InvalidArgument, Malformed, portNotOpened, cannotWrite, incompleteMessage };
 
 enum P_Msg_Type {
     PE_Basic_Msg = 0x01,

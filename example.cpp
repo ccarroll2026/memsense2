@@ -44,16 +44,18 @@ std::string StatusToString(Status stat)
         return "Ok";
     case Status::BufferTooSmall:
         return "BufferTooSmall";
+    case Status::BufferTooBig:
+        return "BufferTooBig";
     case Status::InvalidArgument:
         return "InvalidArgument";
     case Status::Malformed:
         return "Malformed";
-    case Status::WrongMessage:
-        return "WrongMessage";
     case Status::portNotOpened:
         return "portNotOpened";
     case Status::cannotWrite:
         return "cannotWrite";
+    case Status::incompleteMessage:
+        return "incompleteMessage";
     default:
         return "unknown status";
     }
@@ -61,43 +63,43 @@ std::string StatusToString(Status stat)
 
 void testCommands()
 {
-    std::cout << "Ping ";
-    auto res = ping();
-    std::cout << StatusToString(res.second) << std::endl;
-    readSerial();
+    // std::cout << "Ping ";
+    // auto res = ping();
+    // std::cout << StatusToString(res.second) << std::endl;
+    // readSerial();
     
-    std::cout << "selectSensors Acc Ang ";
-    uint8_t msg[2] = {0x81, 0x82};
-    auto res1 = selectSensorData(msg, 2);
-    std::cout << StatusToString(res1.second) << std::endl;
-    readSerial();
+    // std::cout << "selectSensors Acc Ang ";
+    // uint8_t msg[2] = {0x81, 0x82};
+    // auto res1 = selectSensorData(msg, 2);
+    // std::cout << StatusToString(res1.second) << std::endl;
+    // readSerial();
     
 
-    std::cout << "selectSensors Temp Time ";
-    uint8_t msg1[2] = {0x87, 0x88};
-    auto res2 = selectSensorData(msg1, 2);
-    std::cout << StatusToString(res2.second) << std::endl;
-    readSerial();
+    // std::cout << "selectSensors Temp Time ";
+    // uint8_t msg1[2] = {0x87, 0x88};
+    // auto res2 = selectSensorData(msg1, 2);
+    // std::cout << StatusToString(res2.second) << std::endl;
+    // readSerial();
 
-    std::cout << "selectSensors Delta theta/vel ";
-    uint8_t msg2[2] = {0x84, 0x85};
-    auto res3 = selectSensorData(msg2, 2);
-    std::cout << StatusToString(res3.second) << std::endl;
-    readSerial();
+    // std::cout << "selectSensors Delta theta/vel ";
+    // uint8_t msg2[2] = {0x84, 0x85};
+    // auto res3 = selectSensorData(msg2, 2);
+    // std::cout << StatusToString(res3.second) << std::endl;
+    // readSerial();
 
-    std::cout << "reset sensors data ";
-    auto res4 = resetSensorData();
-    std::cout << StatusToString(res4.second) << std::endl;
-    readSerial();
+    // std::cout << "reset sensors data ";
+    // auto res4 = resetSensorData();
+    // std::cout << StatusToString(res4.second) << std::endl;
+    // readSerial();
 
-    std::cout << "reset sensors data ";
-    auto res5 = sendGetDevCmd(PE_Get_Dev_Cal);
-    std::cout << StatusToString(res5.second) << std::endl;
-    readSerial();
+    // std::cout << "reset sensors data ";
+    // auto res5 = sendGetDevCmd(PE_Get_Dev_Cal);
+    // std::cout << StatusToString(res5.second) << std::endl;
+    // readSerial();
 
-    std::cout << "packets accepted = " << getPacketsAccepted() << std::endl;
-    std::cout << "checksum fails = " << getchecksumFailures() << std::endl;
-    std::cout << "bytes discarded = " << getBytesDiscarded() << std::endl;
+    // std::cout << "packets accepted = " << getPacketsAccepted() << std::endl;
+    // std::cout << "checksum fails = " << getchecksumFailures() << std::endl;
+    // std::cout << "bytes discarded = " << getBytesDiscarded() << std::endl;
 }
 
 } // namespace mscip

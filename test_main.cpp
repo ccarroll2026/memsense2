@@ -4,6 +4,12 @@
 #include <cstring>
 #include "structs.h"
 
+
+static size_t g_allocs = 0;
+void* operator new(size_t n) { ++g_allocs; return std::malloc(n); }
+void  operator delete(void* p) noexcept { std::free(p); }
+void  operator delete(void* p, size_t) noexcept { std::free(p); }
+
 namespace mscip {
 
 //Test suite: ChecksumTest
@@ -392,70 +398,86 @@ protected:
 TEST_F(EncoderTest, encodePing)
 {
     uint8_t pingMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x4F, 0x25};
-    bool b = std::memcmp(ping().first.get(), pingMsg, sizeof(pingMsg)) == 0;
-    EXPECT_TRUE(b);
-    // EXPECT_EQ(ping(), pingMsg);
+    Status sts = ping(pingMsg, sizeof(pingMsg));
+    EXPECT_EQ(sts, Status::Ok);
 }
 TEST_F(EncoderTest, encodeSelectSensorDataNewSettings)
 {
     uint8_t selectMsg[] = {0xA5, 0xA5, 0x02, 0x05, 0x0C, 0x03, 0x01, 0x81, 0x82, 0x64, 0xF0};
     uint8_t cmd[] = {0x81, 0x82};
-    bool b = std::memcmp(selectSensorData(cmd, 2).first.get(), selectMsg, sizeof(selectMsg)) == 0;
-    EXPECT_TRUE(b);
-    // EXPECT_EQ(selectSensorData(PE_Scaled_Acc, PE_Scaled_Ang), selectMsg);
+    uint8_t res[sizeof(selectMsg)];
+    Status sts = selectSensorData(cmd, 2, res, sizeof(res));
+    EXPECT_EQ(sts, Status::Ok);
+    for (int i = 0; i < sizeof(selectMsg); i++)
+    {
+        EXPECT_EQ(res[i], selectMsg[i]);
+    }
 }
 TEST_F(EncoderTest, encodeResetSensorData)
 {
     uint8_t resetReply[] = {0xa5, 0xa5, 0x02, 0x03, 0x0c, 0x01, 0x05, 0x61, 0xa2};
-    auto msg = resetSensorData();
-    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.first.get(), resetReply, sizeof(resetReply)));
+    uint8_t res[sizeof(resetReply)];
+    Status sts = resetSensorData(res, sizeof(resetReply));
+    
+    EXPECT_EQ(sts, Status::Ok);
+    for (int i = 0; i < sizeof(resetReply); i++)
+    {
+        EXPECT_EQ(res[i], resetReply[i]);
+    }
 }
 TEST_F(EncoderTest, encodeGetDevModel)
 {
     uint8_t modelMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x05, 0x00, 0x52, 0x2B}; 
-    auto msg = sendGetDevCmd(0x05);
-    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.first.get(), modelMsg, sizeof(modelMsg)));
+    uint8_t res[sizeof(modelMsg)];
+    Status sts = sendGetDevCmd(0x05, res, sizeof(res));
+    EXPECT_EQ(sts, Status::Ok);
+    for (int i = 0; i < sizeof(modelMsg); i++)
+    {
+        EXPECT_EQ(res[i], modelMsg[i]);
+    }
 }
 TEST_F(EncoderTest, encodeGetDevSN)
 {
     uint8_t SNMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x06, 0x00, 0x53, 0x2D};
-    auto msg = sendGetDevCmd(0x06);
-    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.first.get(), SNMsg, sizeof(SNMsg)));
+    uint8_t res[sizeof(SNMsg)];
+    Status sts = sendGetDevCmd(0x06, res, sizeof(res));
+    EXPECT_EQ(sts, Status::Ok);
+    for (int i = 0; i < sizeof(SNMsg); i++)
+    {
+        EXPECT_EQ(res[i], SNMsg[i]);
+    }
 }
 TEST_F(EncoderTest, encodeGetDevFW)
 {
     uint8_t FWMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x07, 0x00, 0x54, 0x2F};
-    auto msg = sendGetDevCmd(0x07);
-    ASSERT_NE(msg.first, nullptr) << "send failed (serial port not open?)";
-    EXPECT_EQ(0, std::memcmp(msg.first.get(), FWMsg, sizeof(FWMsg)));
+    uint8_t res[sizeof(FWMsg)];
+    Status sts = sendGetDevCmd(0x07, res, sizeof(res));
+    EXPECT_EQ(sts, Status::Ok);
+    for (int i = 0; i < sizeof(FWMsg); i++)
+    {
+        EXPECT_EQ(res[i], FWMsg[i]);
+    }
 }
 TEST_F(EncoderTest, encodeInvalidSelectSensors_zero)
 {
-    EXPECT_EQ(selectSensorData({}, 0).second, Status::InvalidArgument);
+    uint8_t res[9];
+    Status sts = selectSensorData({}, 0, res, 9);
+    EXPECT_EQ(sts, Status::InvalidArgument);
 }
 TEST_F(EncoderTest, encodeInvalidSelectSensors_ten) //redundant with below b/c to have 10 you need an invalid code
 {
     uint8_t msg[] = {0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a};
-    EXPECT_EQ(selectSensorData(msg, 0).second, Status::InvalidArgument);
+    uint8_t res[sizeof(msg) + 9];
+    Status sts = selectSensorData(msg, 10, res, sizeof(res));
+    EXPECT_EQ(sts, Status::InvalidArgument);
 }
 TEST_F(EncoderTest, encodeInvalidSelectSensors_badCmd)
 {
     uint8_t msg[] = {0x80, 0x81};
-    EXPECT_EQ(selectSensorData(msg, 0).second, Status::InvalidArgument);
+    uint8_t res[sizeof(msg) + 9];
+    Status sts = selectSensorData(msg, 2, res, sizeof(res));
+    EXPECT_EQ(sts, Status::InvalidArgument);
 }
-// bool testParser()
-// {
-//     // push packet, then push same packet one byte at a time
-//     // push two packets in one push
-//     // push packet in two parts, split at each possible point
-//     // push garbage data before/during/after packet
-//     // push bad checksum packet followed by good packet
-//     // push garbage inclduing a5 a5 that claims long packet followed by good packet
-//     // push max size packet (255)
-// }
 
 class ParserTest : public ::testing::Test {
 protected:
@@ -615,17 +637,14 @@ TEST_F(ParserTest, parseMax)
     uint8_t bufMax[255];
     std::memset(bufMax, 0, sizeof(bufMax));
     bufMax[0] = 0xa5; bufMax[1] = 0xa5; bufMax[2] = 0xa2;
-    auto msg = makeMsg(bufMax, sizeof(bufMax));
+    makeMsg(bufMax, sizeof(bufMax));
+    // auto msg = makeMsg(bufMax, sizeof(bufMax));
     
-    auto pack = parser.push(msg.get(), sizeof(bufMax));
+    auto pack = parser.push(bufMax, sizeof(bufMax));
 
     EXPECT_NE(pack.type, 0x00);
     EXPECT_NE(pack.payloadLen, 0x00) << "len = " << pack.payloadLen;
 }
-// bool testFieldIterator()
-// {
-//     //??
-// }
 
 class FieldIteratorTest : public ::testing::Test {
 protected:
@@ -641,7 +660,6 @@ protected:
 };
 TEST_F(FieldIteratorTest, parseSingleField)
 {
-    
     uint8_t pingReply[] = {0xA5, 0xA5, 0x01, 0x04, 0x80, 0x02, 0x02, 0x00, 0xD3, 0xCF};
     auto pack = parser.push(pingReply, sizeof(pingReply));
     FieldIterator iterator(pack);
@@ -681,10 +699,32 @@ TEST_F(FieldIteratorTest, parseBadSize)
     auto pack = parser.push(pingReply, sizeof(pingReply));
     FieldIterator iterator(pack);
 
-    Field firstField = iterator.getField(0);
+    iterator.getField(0);
     
     EXPECT_EQ(iterator.malformed, true);
 }
+
+TEST(NoAlloc, parseAndEncode) {
+    Parser parser;                 // set up before measuring
+    size_t before = g_allocs;
+
+    /* push bytes, iterate fields, encode ping and selectSensors */
+    uint8_t pingMsg[] = {0xA5, 0xA5, 0x01, 0x02, 0x02, 0x00, 0x4F, 0x25};
+    ping(pingMsg, sizeof(pingMsg));
+
+    uint8_t pingReply[] = {0xA5, 0xA5, 0x01, 0x04, 0x80, 0x02, 0x02, 0x00, 0xD3, 0xCF};
+    auto pack = parser.push(pingReply, sizeof(pingReply));
+    FieldIterator iterator(pack);
+
+    iterator.getField(0);
+
+    uint8_t cmd[] = {0x81, 0x82};
+    uint8_t res[11];
+    selectSensorData(cmd, 2, res, sizeof(res));
+    
+    EXPECT_EQ(g_allocs, before);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
