@@ -5,6 +5,7 @@
 
 namespace mscip {
 
+//functions to get messages which are valid to send to device
 P_Checksum Checksum(uint8_t buf[261], int end);
 void makeMsg(uint8_t* msg, int end);
 Status ping(uint8_t* res, size_t size);
@@ -17,6 +18,7 @@ Status sendCorrGpsTime(uint8_t* vals, size_t vSize, uint8_t* res, size_t size);
 #ifndef P_Parser
 #define P_Parser
 
+//for turning raw stream of bytes into valid PacketView(s)
 class Parser {
 private:
     uint8_t parseBuffer[261];
@@ -40,6 +42,8 @@ public:
 };
 #endif
 
+//For seperating fields out from a single packet's payload
+//each field is the message code, data size, and data
 class FieldIterator {
 public:
     

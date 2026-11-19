@@ -1,3 +1,5 @@
+//Example script to demonstrate use of API
+
 #include <cstdint>
 #include <iostream>
 #include <unistd.h>
@@ -15,10 +17,11 @@
 
 namespace mscip{
 
-int serialFd;
+int serialFd; 
 
-std::vector<PacketView> packets;
+std::vector<PacketView> packets; //holds all good packets found in bytes sent with parser::push()
 
+//Open serial port for reading data from device
 int openSerial()
 {
     int fd = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
@@ -45,12 +48,14 @@ int openSerial()
     return 0;
 }
 
+//Function passed to push as callback function, allows user to do what they'd like with packets found
 void* receivePacket(PacketView pack)
 {
     packets.push_back(pack);
     return nullptr;
 }
 
+//Reads raw bytes from serial port
 int readSerial()
 {
     int fd = serialFd;
@@ -66,6 +71,7 @@ int readSerial()
     while (tries > 0) {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0) {
+            //On every read, push bytes, the number of bytes, and the function to be called on any valid packets
             parser.push(buf, n, &receivePacket);
         }
         tries--;
@@ -74,6 +80,7 @@ int readSerial()
     return 0;
 }
 
+//Send message to serial port function, to be called after getting complete messages from encoding functions like ping()
 Status writeSerial(uint8_t* msg, size_t size)
 {
     if (serialFd < 0)
@@ -98,6 +105,7 @@ Status writeSerial(uint8_t* msg, size_t size)
 
 }
 
+//Helper function to view statuses
 std::string StatusToString(Status stat)
 {
     switch (stat)

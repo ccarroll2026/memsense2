@@ -5,26 +5,30 @@
 #include <new>
 #include "mscip/structs.h"
 
+/*--- For tracking allocation ---*/
 
-// Counting replacements for the global allocation functions (no-allocation check).
-// The whole family must be replaced together: if only some forms are, memory from a
-// non-replaced new (e.g. the nothrow forms used by std::stable_sort) is freed by our delete.
-static size_t g_allocs = 0;
-static void* countedAlloc(size_t n)
-{
-    ++g_allocs;
-    return std::malloc(n ? n : 1);
-}
-void* operator new(size_t n)                                { if (void* p = countedAlloc(n)) return p; throw std::bad_alloc(); }
-void* operator new[](size_t n)                              { if (void* p = countedAlloc(n)) return p; throw std::bad_alloc(); }
-void* operator new(size_t n, const std::nothrow_t&) noexcept   { return countedAlloc(n); }
-void* operator new[](size_t n, const std::nothrow_t&) noexcept { return countedAlloc(n); }
-void  operator delete(void* p) noexcept                     { std::free(p); }
-void  operator delete[](void* p) noexcept                   { std::free(p); }
-void  operator delete(void* p, size_t) noexcept             { std::free(p); }
-void  operator delete[](void* p, size_t) noexcept           { std::free(p); }
-void  operator delete(void* p, const std::nothrow_t&) noexcept   { std::free(p); }
-void  operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
+    // Counting replacements for the global allocation functions (no-allocation check).
+    // The whole family must be replaced together: if only some forms are, memory from a
+    // non-replaced new (e.g. the nothrow forms used by std::stable_sort) is freed by our delete.
+    static size_t g_allocs = 0;
+    static void* countedAlloc(size_t n)
+    {
+        ++g_allocs;
+        return std::malloc(n ? n : 1);
+    }
+    void* operator new(size_t n)                                { if (void* p = countedAlloc(n)) return p; throw std::bad_alloc(); }
+    void* operator new[](size_t n)                              { if (void* p = countedAlloc(n)) return p; throw std::bad_alloc(); }
+    void* operator new(size_t n, const std::nothrow_t&) noexcept   { return countedAlloc(n); }
+    void* operator new[](size_t n, const std::nothrow_t&) noexcept { return countedAlloc(n); }
+    void  operator delete(void* p) noexcept                     { std::free(p); }
+    void  operator delete[](void* p) noexcept                   { std::free(p); }
+    void  operator delete(void* p, size_t) noexcept             { std::free(p); }
+    void  operator delete[](void* p, size_t) noexcept           { std::free(p); }
+    void  operator delete(void* p, const std::nothrow_t&) noexcept   { std::free(p); }
+    void  operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
+
+/*--- End tracking allocation ---*/
+
 
 namespace mscip {
 
@@ -520,12 +524,10 @@ protected:
     }
     static void SetUpTestSuite()
     {
-        destroyHeldPackets();
     }
 
     static void TearDownTestSuite()
     { 
-        destroyHeldPackets();
     }
 
     inline static int count = 0;
@@ -842,7 +844,7 @@ TEST(NoAlloc, parseAndEncode) {
     selectSensorData(cmd, 2, res, sizeof(res));
     
     EXPECT_EQ(g_allocs, before);
-    
+
     // the measured work must really have happened, or the test proves nothing
     EXPECT_EQ(gottenPacket.payloadLen, 4);
     EXPECT_EQ(iterator.malformed, false);
